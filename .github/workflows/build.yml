@@ -15,18 +15,18 @@ jobs:
 
       - name: 配置Python环境
         run: |
-          # 下载独立Python环境
-          wget https://github.com/astral-sh/python-build-standalone/releases/download/20240224/cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz
+          # 下载独立Python环境（使用稍早版本避免兼容性问题）
+          wget https://github.com/astral-sh/python-build-standalone/releases/download/20231014/cpython-3.11.6+20231014-x86_64-unknown-linux-gnu-install_only.tar.gz
           
           # 验证下载
-          if [ ! -f "cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz" ]; then
+          if [ ! -f "cpython-3.11.6+20231014-x86_64-unknown-linux-gnu-install_only.tar.gz" ]; then
             echo "Python压缩包下载失败"
             exit 1
           fi
           
           # 解压Python
           mkdir -p python
-          tar -xzf cpython-3.11.8+20240224-x86_64-unknown-linux-gnu-install_only.tar.gz -C python --strip-components=1
+          tar -xzf cpython-3.11.6+20231014-x86_64-unknown-linux-gnu-install_only.tar.gz -C python --strip-components=1
           
           # 验证Python安装
           if [ ! -f "./python/bin/python" ]; then
@@ -37,36 +37,49 @@ jobs:
 
       - name: 安装依赖
         run: |
-          # 升级pip并安装依赖
-          ./python/bin/python -m pip install --upgrade pip
+          # 升级pip并安装依赖（指定兼容版本）
+          ./python/bin/python -m pip install pip==24.0  # 回退到之前的稳定版本
           ./python/bin/python -m pip install flask==2.2.3 pyinstaller==5.13.0
           
-          # 优化验证方式：直接检查安装列表
-          echo "验证已安装的包："
-          ./python/bin/pip list | grep -E "flask|pyinstaller"
+          # 查看安装路径确认
+          echo "Flask安装路径:"
+          ./python/bin/pip show flask | grep Location
           
-          # 更可靠的导入验证（显式指定Python路径）
-          if ! ./python/bin/python -c "import flask; print('Flask版本:', flask.__version__)" > /dev/null 2>&1; then
+          # 查看Python路径配置
+          ./python/bin/python -c "import sys; print('Python路径:', sys.path)"
+          
+          # 简化验证方式（忽略输出到/dev/null可能导致的误判）
+          echo "尝试导入Flask..."
+          if ./python/bin/python -c "import flask; print('成功导入Flask，版本:', flask.__version__)"; then
+            echo "依赖验证成功"
+          else
             echo "依赖验证失败：无法导入Flask"
             exit 1
           fi
-          
-          echo "依赖安装并验证成功"
 
       - name: 打包应用
         run: |
           # 假设主文件为app.py，根据实际文件名修改
-          MAIN_FILE="app.py"  # 这里替换为你的实际文件名
+          MAIN_FILE="app.py"  # 替换为你的实际文件名
           if [ ! -f "$MAIN_FILE" ]; then
             echo "未找到主程序文件 $MAIN_FILE"
             exit 1
           fi
           
-          # 使用pyinstaller打包
+          # 显式指定Python路径和依赖路径
+          export PYTHONPATH=$(./python/bin/python -c "import site; print(site.getsitepackages()[0])")
+          echo "PYTHONPATH设置为: $PYTHONPATH"
+          
+          # 使用pyinstaller打包（增加更详细的路径配置）
           ./python/bin/pyinstaller --onefile --name flask-xml-service \
+            --paths="$PYTHONPATH" \
             --hidden-import=flask \
+            --hidden-import=flask.app \
             --hidden-import=flask.json \
             --hidden-import=werkzeug \
+            --hidden-import=jinja2 \
+            --hidden-import=click \
+            --hidden-import=itsdangerous \
             $MAIN_FILE
           
           # 验证打包结果
